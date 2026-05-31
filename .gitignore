@@ -1,0 +1,15 @@
+# Python environment and caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+
+# Local Database State
+store.db
+
+# User Uploaded Images
+resources/*
+!resources/.gitkeep
