@@ -139,6 +139,40 @@ def describe_product_image(image_path: str) ->str:
     response = vision_llm.invoke([message])
     return response.content
 
+@tool
+def get_order_history() ->str:
+    """
+    Retrieve the historical list of all past orders placed by the user from the database.
+    Returns a JSON array containing details like order order_id, product_id, product_name, and price.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT id, product_id, product_name, price FROM orders ORDER BY id DESC")
+        rows = cursor.fetchall()
+
+        if not rows:
+            return json.dumps({"message": "You haven't placed any orders yet."})
+        
+        orders = [
+            {
+                "order_id": row[0],
+                "product_id": row[1],
+                "product_name": row[2],
+                "price": row[3]
+            }
+            for row in rows
+        ]
+
+        return json.dumps(orders)
+
+    except sqlite3.OperationalError as e:
+        return json.dumps({"error": f"Database error: {str(e)}. Ensure the orders table exists."})
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Agent
 # ---------------------------------------------------------------------------
@@ -146,9 +180,14 @@ def describe_product_image(image_path: str) ->str:
 
 agent = create_agent(
     model = llm,
-    tools= [search_products, get_rating, checkout, describe_product_image],
+    tools= [search_products, get_rating, checkout, describe_product_image, get_order_history],
     system_prompt= (
         "You are a helpful shopping assistant. Follow these rules strictly.\n\n"
+        "ORDER HISTORY — when the user asks about past orders (e.g., 'What have I ordered before?', 'show my history'):\n"
+        "1. Call get_order_history to retrieve past transactions.\n"
+        "2. Parse the returned JSON data.\n"
+        "3. Present the list of past orders to the user clearly with Order IDs, Product Names, and Prices in plain text.\n"
+        "4. If no orders exist, politely inform them.\n\n"
         "IMAGE SEARCH — when the user provides an image path:\n"
         "1. Call describe_product_image with the path to identify the product.\n"
         "2. Use the returned search_query and is_organic to call search_products.\n"
@@ -182,9 +221,7 @@ if __name__ == "__main__":
             "messages": [
                 {
                     "role": "user",
-                    "content":(
-                        "I want to buy organic honey with 4.5+ rating and less than $20 price."
-                    ),
+                    "content": "What have I ordered before?"
                 }
             ]
         }
