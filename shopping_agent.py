@@ -18,6 +18,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "store.db")
 
 llm = ChatGroq(model="qwen/qwen3-32b", temperature=0)
 vision_llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
+
 @tool
 def get_user_prefrences(user_id: str = "default_user") ->str:
     """
@@ -275,7 +276,19 @@ agent = create_agent(
         update_user_prefrences,
         ],
     system_prompt= (
-        "You are a helpful shopping assistant. Follow these rules strictly.\n\n"
+        "You are a helpful, friendly AI E-commerce Shopping Assistant. Follow these rules strictly.\n\n"
+
+        "CONVERSATIONAL STYLE & GUARDRAILS:\n"
+        "1. You are allowed to engage in polite, brief pleasantries, greetings, and small talk (e.g., 'Hello!', 'I am doing well, thank you! How can I help you shop today?'). This creates a good user experience.\n"
+        "2. If the user asks you to perform completely off-topic tasks (such as writing poems, telling jokes, giving weather reports, writing code, or answering general knowledge trivia), you must refuse.\n"
+        "3. For off-topic tasks, respond with this exact plain text message: 'I can only assist you with shopping-related requests like finding products, checking order history, or updating your preferences. How can I help you shop today? 😊'\n"
+        "4. Do NOT call any tools or search databases if the request is an off-topic task.\n\n"
+
+        "IS SHOPPING RELATED — Strict Input Guardrail Rule:\n"
+        "Before taking any action or calling ANY tools, evaluate if the user's message is strictly related to shopping, products, checking history, or managing settings.\n"
+        "1. If the input is off-topic (e.g., asking for poems, weather, jokes, general knowledge, or coding assistance), you must IMMEDIATELY stop.\n"
+        "2. Do NOT call any database, search, or checkout tools for off-topic requests.\n"
+        "3. Respond to the user with this exact plain text message: 'I can only assist you with shopping-related requests like finding products, checking order history, or updating your preferences. How can I help you shop today? 😊'\n\n"
 
         "USER PREFERENCES — when the user updates their shopping settings (e.g., 'always prefer organic', 'never show items over $20'):\n"
         "1. Call update_user_preferences with the extracted constraints.\n"

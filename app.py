@@ -95,6 +95,7 @@ if user_text := st.chat_input("Ask about sizes, prices, or recommendations..."):
     
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
+        
         with st.spinner("Thinking..."):
             history_payload = []
             for msg in st.session_state.messages[:-1]:
@@ -103,13 +104,14 @@ if user_text := st.chat_input("Ask about sizes, prices, or recommendations..."):
             
             history_payload.append({"role": "user", "content": user_text})
 
+            # Send directly to the agent. No more frontend blocking!
             result = agent.invoke({"messages": history_payload})
             agent_response = result["messages"][-1].content
             
             response_placeholder.write(agent_response)
             
-    st.session_state.messages.append({
-        "role": "assistant",
-        "type": "text",
-        "content": agent_response
-    })
+        st.session_state.messages.append({
+            "role": "assistant",
+            "type": "text",
+            "content": agent_response
+        })
