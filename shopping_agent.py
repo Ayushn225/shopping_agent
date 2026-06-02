@@ -18,6 +18,91 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "store.db")
 
 llm = ChatGroq(model="qwen/qwen3-32b", temperature=0)
 vision_llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
+@tool
+def get_user_prefrences(user_id: str = "default_user") ->str:
+    """
+    Retrieve the saved shopping preferences for a user (e.g., maximum price limit, organic filter).
+    Returns a JSON string containing preferences like max_price and prefers_organic.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id TEXT PRIMARY KEY,
+            max_price REAL,
+            prefers_organic INTEGER
+        )
+    """)
+    conn.commit()
+
+    cursor.execute("SELECT max_price, prefers_organic FROM user_preferences WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        # Default fallback values if they haven't saved anything yet
+        return json.dumps({"max_price": None, "prefers_organic": None})
+    
+    return json.dumps({
+        "max_price": row[0],
+        "prefers_organic": bool(row[1]) if row[1] is not None else None
+    })
+
+@tool
+def update_user_prefrences(
+    max_price: Optional[float] = None, 
+    prefers_organic: Optional[bool] = None, 
+    user_id: str= "default_user",
+    clear_all: bool = False,
+    ) ->str:
+    """
+    Save, update, or clear the user's shopping preferences in the database.
+    Set clear_all=True if the user wants to reset/remove their preferences.
+    """
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id TEXT PRIMARY KEY,
+            max_price REAL,
+            prefers_organic INTEGER
+        )
+    """)
+
+    cursor.execute("SELECT max_price, prefers_organic FROM user_preferences WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+
+    if clear_all:
+        cursor.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return "All your personalized shopping preferences have been cleared and reset."
+
+    # Establish fallback defaults if row is None (First-time user)
+    current_max = row[0] if row is not None else None
+    current_organic = row[1] if row is not None else None
+
+    current_max = row[0] if row else None
+    current_organic = row[1] if row else None
+
+    new_max = max_price if max_price is not None else current_max
+    new_organic = 1 if prefers_organic is True else (0 if prefers_organic is False else current_organic)
+
+    cursor.execute("""
+        INSERT INTO user_preferences (user_id, max_price, prefers_organic)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            max_price = excluded.max_price,
+            prefers_organic = excluded.prefers_organic
+    """, (user_id, new_max, new_organic))
+
+    conn.commit()
+    conn.close()
+    
+    return f"Preferences updated successfully: Max Price = ${new_max if new_max else 'None'}, Prefers Organic = {bool(new_organic) if new_organic is not None else 'None'}."
 
 @tool
 def search_products(query: str, max_price: Optional[float] = None, is_organic: Optional[bool] = None)->str:
@@ -180,50 +265,76 @@ def get_order_history() ->str:
 
 agent = create_agent(
     model = llm,
-    tools= [search_products, get_rating, checkout, describe_product_image, get_order_history],
+    tools= [
+        search_products, 
+        get_rating, 
+        checkout, 
+        describe_product_image, 
+        get_order_history,
+        get_user_prefrences,
+        update_user_prefrences,
+        ],
     system_prompt= (
         "You are a helpful shopping assistant. Follow these rules strictly.\n\n"
+
+        "USER PREFERENCES — when the user updates their shopping settings (e.g., 'always prefer organic', 'never show items over $20'):\n"
+        "1. Call update_user_preferences with the extracted constraints.\n"
+        "2. Confirm to the user that their setting has been locked into their profile.\n\n"
+
         "ORDER HISTORY — when the user asks about past orders (e.g., 'What have I ordered before?', 'show my history'):\n"
         "1. Call get_order_history to retrieve past transactions.\n"
         "2. Parse the returned JSON data.\n"
         "3. Present the list of past orders to the user clearly with Order IDs, Product Names, and Prices in plain text.\n"
         "4. If no orders exist, politely inform them.\n\n"
+
         "IMAGE SEARCH — when the user provides an image path:\n"
         "1. Call describe_product_image with the path to identify the product.\n"
-        "2. Use the returned search_query and is_organic to call search_products.\n"
-        "3. Continue with the BROWSING flow from step 2 onwards.\n\n"
+        "2. Call get_user_preferences to see if they have profile filters.\n"
+        "3. Use the image data combined with profile preferences to call search_products.\n"
+        "4. Continue with the BROWSING flow from step 2 onwards.\n\n"
+
         "BROWSING — when the user describes what they want to buy:\n"
-        "1. Call search_products to find matching items (apply any price/organic filters given).\n"
-        "2. For each candidate, call get_rating to retrieve its average rating.\n"
-        "3. Filter by the user's minimum rating if specified.\n"
-        "4. Present qualifying products as a numbered list. For each item use this exact format "
+        "1. ALWAYS call get_user_preferences FIRST to check if the user has active restrictions (like organic choice or budget limits).\n"
+        "2. Call search_products to find matching items. You must apply the user's stored profile filters automatically UNLESS the user explicitly overwrites them in their current text prompt.\n"
+        "3. For each candidate, call get_rating to retrieve its average rating.\n"
+        "4. Filter by the user's minimum rating if specified.\n"
+        "5. Present qualifying products as a numbered list. For each item use this exact format "
         "   (plain text, no backticks, no code blocks, no bold, no italic):\n\n"
         "   #<number>. <name> (ID:<product_id>) — $<price> ★<rating> — <organic or non-organic>\n\n"
         "   Add a blank line between each product entry for readability. "
         "   Always include (ID:X) so you can reference it later.\n"
-        "5. If only one product qualifies, still show it in the list and ask: "
+        "6. If only one product qualifies, still show it in the list and ask: "
         "   'Would you like to order it? Just say yes or give me the number.'\n"
-        "6. Do NOT call checkout at this stage.\n\n"
+        "7. Do NOT call checkout at this stage.\n\n"
+
         "ORDERING — when the user confirms they want to buy (e.g. 'yes', 'sure', 'go ahead', "
         "'order number 2', 'the first one', 'get me #3'):\n"
         "1. Look at your previous message to find the (ID:X) for the chosen product "
         "   (if only one was listed and the user says 'yes', use that product's ID).\n"
         "2. Call checkout with that product_id (the number from (ID:X)).\n"
         "3. Confirm the order to the user in plain text.\n\n"
+
         "Never place an order unless the user explicitly confirms. "
         "Never guess a product_id — always take it from the (ID:X) in your own previous message."
     ),
 )
 
 if __name__ == "__main__":
-    result = agent.invoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "What have I ordered before?"
-                }
-            ]
-        }
-    )
-    print(result["messages"][-1].content)
+    print("--- Session 1: Setting Preferences ---")
+    setup_result = agent.invoke({
+        "messages": [{
+            "role": "user",
+            "content": "Hey! From now on, I always prefer organic products and I never want items over $20."
+        }]
+    })
+    print(setup_result["messages"][-1].content)
+    print("\n" + "="*40 + "\n")
+
+    print("--- Session 2: Verifying Preference Retention ---")
+    query_result = agent.invoke({
+        "messages": [{
+            "role": "user",
+            "content": "What are my preferences right now?"
+        }]
+    })
+    print(query_result["messages"][-1].content)
