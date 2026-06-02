@@ -16,11 +16,11 @@ load_dotenv()
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "store.db")
 
-llm = ChatGroq(model="qwen/qwen3-32b", temperature=0)
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
 vision_llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
 
 @tool
-def get_user_prefrences(user_id: str = "default_user") ->str:
+def get_user_preferences(user_id: str = "default_user") ->str:
     """
     Retrieve the saved shopping preferences for a user (e.g., maximum price limit, organic filter).
     Returns a JSON string containing preferences like max_price and prefers_organic.
@@ -51,7 +51,7 @@ def get_user_prefrences(user_id: str = "default_user") ->str:
     })
 
 @tool
-def update_user_prefrences(
+def update_user_preferences(
     max_price: Optional[float] = None, 
     prefers_organic: Optional[bool] = None, 
     user_id: str= "default_user",
@@ -272,8 +272,8 @@ agent = create_agent(
         checkout, 
         describe_product_image, 
         get_order_history,
-        get_user_prefrences,
-        update_user_prefrences,
+        get_user_preferences,
+        update_user_preferences,
         ],
     system_prompt= (
         "You are a helpful, friendly AI E-commerce Shopping Assistant. Follow these rules strictly.\n\n"

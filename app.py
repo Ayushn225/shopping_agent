@@ -103,7 +103,7 @@ if user_text := st.chat_input("Ask about sizes, prices, or recommendations..."):
                     history_payload.append({"role": msg["role"], "content": msg["content"]})
             
             history_payload.append({"role": "user", "content": user_text})
-
+            history_payload = history_payload[-5:]
             # Send directly to the agent. No more frontend blocking!
             result = agent.invoke({"messages": history_payload})
             agent_response = result["messages"][-1].content

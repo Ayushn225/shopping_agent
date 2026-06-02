@@ -1,6 +1,6 @@
 import json
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from shopping_agent import agent, llm
 
 # ---------------------------------------------------------------------------
@@ -9,23 +9,27 @@ from shopping_agent import agent, llm
 # ---------------------------------------------------------------------------
 tool_accuracy_cases = [
     (
-        "Find me organic honey under $20",
+        [HumanMessage(content="Find me organic honey under $20")],
         "search_products",
         {"query": "honey", "max_price": 20.0, "is_organic": True}
     ),
     (
-        "Check what I ordered before",
+        [HumanMessage(content="Check what I ordered before")],
         "get_order_history",
         {}
     ),
     (
-        "I want to order product 3",
+        [
+            HumanMessage(content="Show me organic honey"),
+            AIMessage(content="#1. Organic Raw Honey (ID:3) — $15.00 ★4.8 — organic"),  # Mock Context
+            HumanMessage(content="I want to order product 3")
+        ],
         "checkout",
         {"product_id": 3}
     ),
     (
-        "Don't show me any items above fifty dollars",
-        "update_user_prefrences",
+        [HumanMessage(content="Don't show me any items above fifty dollars")],
+        "update_user_preferences", # Corrected target assertion string
         {"max_price": 50.0}
     )
 ]
@@ -48,19 +52,18 @@ response_quality_cases = [
 # ---------------------------------------------------------------------------
 # EVALUATION 1: Tool Call Accuracy Execution
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("query, expected_tool, expected_args", tool_accuracy_cases)
-def test_tool_call_accuracy(query, expected_tool, expected_args):
+@pytest.mark.parametrize("messages, expected_tool, expected_args", tool_accuracy_cases)
+def test_tool_call_accuracy(messages, expected_tool, expected_args):
     """Asserts the agent calls the right tools with the right parameters."""
-    result = agent.invoke({"messages": [HumanMessage(content=query)]})
+    result = agent.invoke({"messages": messages})
     
-    # Extract generated tool calls from execution history
     tool_calls = []
     for msg in result["messages"]:
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             for tool_call in msg.tool_calls:
                 tool_calls.append(tool_call)
 
-    assert len(tool_calls) > 0, f"The agent failed to trigger any tools for query: '{query}'"
+    assert len(tool_calls) > 0, f"The agent failed to trigger any tools for input history."
     
     target_call = next((tc for tc in tool_calls if tc["name"] == expected_tool), None)
     assert target_call is not None, f"Expected tool '{expected_tool}' was not called. Found: {[tc['name'] for tc in tool_calls]}"
